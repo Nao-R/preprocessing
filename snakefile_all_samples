@@ -221,8 +221,8 @@ rule fixmateinfo:
         mem="14G",          # pour tous les éch (car fichiers .bam taille entre 22G-5G environ)
         cpus="2",
         # Paths originaux pour cleanup ensuite
-        original_bam=data_dir+"mapped/{sample}.sorted.bam",
-        original_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+        sorted_bam=data_dir+"mapped/{sample}.sorted.bam",
+        sorted_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
     input:
         bam=data_dir+"mapped/{sample}.sorted.bam"
     output:
@@ -244,7 +244,7 @@ rule fixmateinfo:
         # Verifications outputs ok
         if [ -s {output.fixmateinfo_bam} ] ; then
             # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.original_bam} {params.original_bai}
+            rm -f {params.sorted_bam} {params.sorted_bai}
         else
             echo "Error: Output files not generated properly" > {params.err}
             exit 1

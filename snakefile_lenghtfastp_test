@@ -1,0 +1,61 @@
+# Echantillon test
+SAMPLES_SHORT = ["Cimex406_R1"]
+
+# Longueurs à tester 
+LENGTHS = [50, 100, 140]  
+
+print(SAMPLES_SHORT, type(SAMPLES_SHORT))
+
+# RULE ALL, appel le reste des règles
+rule all:
+    input:
+        # Targets
+        expand("../data/clean/{sample}_clean_{length}.fastq.gz", sample=SAMPLES_SHORT, length=LENGTHS),
+        expand("../qc/fastqc_clean/{sample}_fastqc_{length}.html", sample=SAMPLES_SHORT, length=LENGTHS)
+
+# Nettoyage avec Fastp
+rule clean:
+    input:
+        r1="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}.fastq.gz",
+    output:
+        r1="../data/clean/{sample}_clean_{length}.fastq.gz", # clean reads
+        html="../data/clean/{sample}_{length}.html", # html output
+        json="../data/clean/{sample}_{length}.json" # json report
+    params:
+        out="../logs/clean/{sample}_{length}.log",
+        err="../logs/clean/{sample}_{length}.err",
+        name="{sample}",
+        length="{length}"
+    resources: time_min=360, mem_mb=7000, cpus=2
+    threads: 2
+    benchmark:
+        "../benchmark/clean/{sample}_{length}.tsv"
+    shell:
+        """
+        mkdir -p ../data/clean/
+        mkdir -p ../logs/clean/
+        /beegfs/home/varaldi/TOOLS/fastp -i {input.r1} -o {output.r1} -j {output.json} -h {output.html} --length_required {params.length} > {params.out} 2> {params.err}   
+        """
+
+# FASTQC Controle quality
+rule fastqc_after_cleaning:
+    input:
+        "../data/clean/{sample}_clean_{length}.fastq.gz"
+    output:
+        html="../qc/fastqc_clean/{sample}_fastqc_{length}.html",
+        zip="../qc/fastqc_clean/{sample}_fastqc_{length}.zip"
+    conda: "fastqc_env.yaml"
+    params:
+        out="../logs/fastqc_clean/{sample}_{length}.log",
+        err="../logs/fastqc_clean/{sample}_{length}.err",
+        name="{sample}"
+    resources: time_min=200, mem_mb=1000, cpus=2
+    threads: 2
+    benchmark:
+        "../benchmark/fastqc_after_cleaning/{sample}_{length}.tsv"
+    shell:
+        """
+        mkdir -p ../logs/fastqc_clean/
+        mkdir -p ../qc/fastqc_clean/
+        fastqc --outdir ../qc/fastqc_clean/ {input} > {params.out} 2> {params.err}
+        """

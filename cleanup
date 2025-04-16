@@ -1,0 +1,66 @@
+# COMMANDES LANCEMENT
+# snakemake -s cleanup --cores 1
+
+
+# ===== DEFINITION DES ECHANTILLONS ===== #
+# All samples {sample}.fastq.gz
+DATA = glob_wildcards("/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/{sample}.sorted.bam").sample
+
+# Samples to exclude (les 15 + gros), ici batch PETIT
+SAMPLES_EXCLUDED = {'Cimex18-7', 'Cimex443', 'Cimex18-21', 'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142', 'Cimex18-35', 'Cimex41'}
+
+SAMPLES = [sample for sample in DATA if sample not in SAMPLES_EXCLUDED]
+
+# PRINT listes samples
+print(SAMPLES, type(SAMPLES))
+
+
+# ===== DEFINITION DES PATHS ===== #
+# Raw data:
+raw_dir="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/"               
+# New data:
+data_dir="/beegfs/data/nroscigni/bedbugs/quality_control/data/"
+# Outputs contrôle qualité
+qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
+# Conda environments:
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
+# Logiciels utilisés:
+fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
+# Logs:
+logs_dir="/beegfs/data/nroscigni/bedbugs/quality_control/logs/"
+# Benchmarks 
+benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
+
+
+# RULE ALL
+rule clean_all_samples:
+    input:
+        expand(data_dir + "mapped/{sample}_cleanup.done", sample=SAMPLES)
+
+
+# CLEANUP DES FICHIERS CLEAN APRES MAPPING
+rule cleanup:
+    # Deletes clean fastq files ONLY if:
+    # final sorted BAM ({sample}.sorted.bam) exists & is non-empty (size>0)
+    input:
+        bam = data_dir + "mapped/{sample}.sorted.bam",  # FINAL BAM (& pas .tmp files)
+        # bai = data_dir + "mapped/{sample}.sorted.bam.bai"  
+    output:
+        # Sentinel file!
+        done = touch(data_dir + "mapped/{sample}_cleanup.done")  
+    params:
+        r1 = data_dir + "clean/{sample}_R1_clean.fastq.gz",
+        r2 = data_dir + "clean/{sample}_R2_clean.fastq.gz"
+    log:
+        out = logs_dir + "mapping/{sample}_cleanup.log",
+        err = logs_dir + "mapping/{sample}_cleanup.err"
+    shell:
+        """
+        if [ -s {input.bam} ]; then
+            echo "Deleting clean fastq for {wildcards.sample}" > {log.out}
+            rm -f {params.r1} {params.r2}
+        else
+            echo "Error: BAM file missing/empty; FASTQs preserved" > {log.err}
+            exit 1
+        fi
+        """

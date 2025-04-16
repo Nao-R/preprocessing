@@ -1,0 +1,286 @@
+# ===== COMMANDE LANCEMENT ===== #
+# snakemake -s snakefile_1sample --rerun-triggers mtime --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.cpus} -o {params.out} -e {params.err}" --jobs 1 --use-conda --conda-frontend conda -np 
+
+# ===== DEFINITION DES ECHANTILLONS ===== #
+# Tous les samples {sample}.fastq.gz)
+SAMPLES = ['Cimex443']
+
+print(SAMPLES, type(SAMPLES))
+
+# ===== DEFINITION DES PATHS ===== #
+# Raw data:
+raw_dir="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/"           # données brutes chez JV     
+
+# New data:
+data_dir="/beegfs/data/nroscigni/bedbugs/quality_control/data/"
+
+# Outputs contrôle qualité
+qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
+
+
+# Conda environments:
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        # à créer!
+
+# Logiciels utilisés:
+fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
+
+
+# Logs:
+logs_dir="/beegfs/data/nroscigni/bedbugs/quality_control/logs/"
+# Benchmarks 
+benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
+
+
+# =================================================================== RULE ALL =================================================================== #
+
+
+# RULE ALL, appel le reste des règles
+rule all:
+    input:
+        # FASTQC
+        expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
+        expand(qc_dir+"fastqc/{sample}_R2_fastqc.zip", sample=SAMPLES),
+        # CLEAN
+        # expand(data_dir+"clean/{sample}_R1_clean.fastq.gz", sample=SAMPLES),
+        # expand(data_dir+"clean/{sample}_R2_clean.fastq.gz", sample=SAMPLES),
+        # FASTQC AFTER CLEANING
+        # expand(qc_dir+"fastqc_clean/{sample}_R1_clean_fastqc.html", sample=SAMPLES),
+        # expand(qc_dir+"fastqc_clean/{sample}_R2_clean_fastqc.zip", sample=SAMPLES),
+        
+        # MAPPING & TRI
+        expand(data_dir+"mapped/{sample}.sorted.bam", sample=SAMPLES),
+        # INDEX
+        expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
+
+
+# ======================================================== CONTROLE QUALITE & NETTOYAGE READS ======================================================== #
+
+# CONTROLE QUALITE AVANT NETTOYAGE
+rule fastqc:    
+    params:
+        name= "fastqc{sample}",   
+        partition="normal",
+        out=logs_dir+"fastqc/{sample}.log",
+        err=logs_dir+"fastqc/{sample}.err",
+        time= "1:00:00", 
+        mem= "1G", 
+        cpus= "1"
+    input:
+        raw_dir+"{sample}.fastq.gz"
+    output:
+        html= qc_dir+"fastqc/{sample}_fastqc.html",
+        zip= qc_dir+"fastqc/{sample}_fastqc.zip"
+    conda: "fastqc_env.yaml"
+    benchmark:
+        benchmarks_dir+"fastqc/{sample}.tsv"
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/qc/fastqc/"
+        fastqc --outdir qc_dir+"fastqc/" {input} 
+        """
+
+# NETTOYAGE 
+rule clean:
+    params:
+        name="clean{sample}",   
+        partition="normal",
+        out=logs_dir+"clean/{sample}.log",
+        err=logs_dir+"clean/{sample}.err",
+        time="2:20:00", 
+        mem="10G", 
+        cpus="2"
+    input:
+        r1= raw_dir+"{sample}_R1.fastq.gz",
+        r2= raw_dir+"{sample}_R2.fastq.gz"
+    output:
+        r1= data_dir+"clean/{sample}_R1_clean.fastq.gz", 
+        r2= data_dir+"clean/{sample}_R2_clean.fastq.gz", 
+        html= data_dir+"clean/{sample}.html", 
+        json= data_dir+"clean/{sample}.json" 
+    benchmark:
+        benchmarks_dir+"clean/{sample}.tsv"
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/clean/"
+        fastp_dir -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2} -j {output.json} -h {output.html} --length_required 50    # sans dedup, avec minimum de 50bp 
+        """
+
+# CONTROLE QUALITE APRES NETTOYAGE
+rule fastqc_after_cleaning:     # fastqc téléchargé sur pbil-deb mais pas sur les noeuds du cluster
+    params:
+        name="fastqc_after_cleaning{sample}",   
+        partition="normal",
+        out=logs_dir+"fastqc_clean/{sample}.log",
+        err=logs_dir+"fastqc_clean/{sample}.err",
+        time="1:00:00", 
+        mem="1G", 
+        cpus="1"
+    input:
+        data_dir+"clean/{sample}.fastq.gz"
+    output:
+        html= qc_dir+"fastqc_clean/{sample}_fastqc.html",
+        zip= qc_dir+"fastqc_clean/{sample}_fastqc.zip"
+    conda: "fastqc_env.yaml"
+    benchmark:
+        benchmarks_dir+"fastqc_after_cleaning/{sample}.tsv"
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/qc/fastqc_clean/"
+        fastqc --outdir qc_dir+"fastqc_clean/" {input} 
+        """
+
+
+# ======================================================== MAPPING DES READS + TRI & INDEX .BAM ======================================================== #
+
+# MAPPING DES READS & TRI
+rule mapping:
+    params:
+        name="mapping{sample}",   
+        partition="normal",
+        out= logs_dir+"mapping/{sample}.log",
+        err= logs_dir+"mapping/{sample}.err",
+        rg="@RG\\tID:{sample}\\tSM:{sample}\\tPL:ILLUMINA",
+        time="9:00:00",
+        mem="17gG",
+        cpus="8"
+    input:
+        r1= data_dir+"clean/{sample}_R1_clean.fastq.gz",
+        r2= data_dir+"clean/{sample}_R2_clean.fastq.gz",
+        ref="/beegfs/data/nroscigni/bedbugs/quality_control/data/ref_genome/Cimex_ref_genome.fa"
+    output:
+        bam= data_dir+"mapped/{sample}.sorted.bam",
+        # Sentinel file si ok!
+        done= touch(data_dir+"mapped/{sample}_cleanup.done")
+    conda: "mapping_env.yaml"
+    benchmark:
+        benchmarks_dir+"mapping/{sample}.tsv"
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
+
+        bwa-mem2 mem -t {params.cpus} -M -R '{params.rg}' {input.ref} {input.r1} {input.r2} | samtools sort -m 2G -@ 2 -o {output.bam} - 
+
+        # Check si BAM ok &
+        if [ -s {output.bam} ]; then
+            rm -f {input.r1} {input.r2}
+        else
+            echo "Error: BAM file not created properly" > {params.err}
+            exit 1
+        fi        
+        """
+
+# INDEX
+rule index:
+    params:
+        name="index{sample}",   
+        partition="normal",
+        out= logs_dir+"mapping/{sample}_index.log",
+        err= logs_dir+"mapping/{sample}_index.err",
+        time="00:10:00",
+        mem="150M",
+        cpus="1"
+    input:
+        sorted_bam= data_dir+"mapped/{sample}.sorted.bam"
+    output:
+        bai= data_dir+"mapped/{sample}.sorted.bam.bai"
+    conda: "mapping_env.yaml"
+    benchmark:
+        benchmarks_dir+"mapping/{sample}_index.tsv"
+    shell:
+        """
+        samtools index {input.sorted_bam}
+        """
+
+
+# ======================================================== DEDUPLICATION & FIXMATEINFORMATION ======================================================== #
+
+rule deduplicate:
+    params:
+        name="deduplicate{sample}",   
+        partition="normal",
+        out=logs_dir+"deduplicate/{sample}_dedup.log",
+        err=logs_dir+"deduplicate/{sample}_dedup.err",
+        time="4:00:00", 
+        mem="8G", 
+        cpus="2",
+        # Paths originaux pour cleanup ensuite
+        original_bam=data_dir+"mapped/{sample}.sorted.bam",
+        original_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+    input:
+        bam=data_dir+"mapped/{sample}.sorted.bam",
+        bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+    output:
+        marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
+        marked_bai=data_dir+"deduplicated/{sample}.markedDup.bam.bai",
+        metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
+        # Sentinel file
+        done=touch(data_dir+"deduplicated/{sample}.dedup_complete.flag")
+    conda: "picard_env.yaml"
+    benchmark:
+        benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/"
+        
+        # Picard MarkDuplicates
+        picard MarkDuplicates \
+            INPUT={input.bam} \
+            OUTPUT={output.marked_bam} \
+            METRICS_FILE={output.metrics} \
+            CREATE_INDEX=true
+        
+        # Verifications outputs ok
+        if [ -s {output.marked_bam} ] && [ -s {output.marked_bai} ]; then
+            # Suppresion des fichiers .bam & .bai originaux:
+            rm -f {params.original_bam} {params.original_bai}
+        else
+            echo "Error: Output files not generated properly" > {params.err}
+            exit 1
+        fi
+        """
+
+
+# FIXMATEINFO
+rule fixmateinfo:
+    params:
+        name="fixmateinfo{sample}",   
+        partition="normal",
+        out= logs_dir+"deduplicate/{sample}_fixmateinfo.log",
+        err= logs_dir+"deduplicate/{sample}_fixmateinfo.err",
+        time="3:0:00", 
+        mem="5G", 
+        cpus="2",
+        # Paths originaux pour cleanup ensuite
+        dedup_bam=data_dir+"mapped/{sample}.markedDup.bam",
+        dedup_bai=data_dir+"mapped/{sample}.markedDup.bam.bai"
+    input:
+        bam= data_dir+"deduplicated/{sample}.markedDup.bam",            
+        bai= data_dir+"../data/deduplicated/{sample}.markedDup.bam.bai"
+    output:
+        final_bam= data_dir+"deduplicated/{sample}.dedup.bam",
+        final_bai= data_dir+"deduplicated/{sample}.dedup.bam.bai",
+        # Sentinel file
+        done= touch(data_dir+"deduplicated/{sample}.final_complete.flag")
+    conda: "picard_env.yaml"
+    benchmark:
+        benchmarks_dir+"deduplicate/{sample}_fixmateinfo.tsv"
+    shell:
+        """
+        # Picard FixMateInformation
+        picard FixMateInformation \
+            I={input.bam} \
+            O={output.final_bam} \
+            SO=coordinate \
+            VALIDATION_STRINGENCY = LENIENT \
+            CREATE_INDEX=true
+        
+        # Verifications outputs ok
+        if [ -s {output.final_bam} ] && [ -s {output.final_bai} ]; then
+            # Suppresion des fichiers .bam & .bai originaux:
+            rm -f {params.dedup_bam} {params.dedup_bai}
+        else
+            echo "Error: Output files not generated properly" > {params.err}
+            exit 1
+        fi
+        """
+        

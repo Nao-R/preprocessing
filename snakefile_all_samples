@@ -208,29 +208,68 @@ rule index:
         """
 
 
-# ======================================================== DEDUPLICATION & FIXMATEINFORMATION ======================================================== #
+# ======================================================== FIXMATEINFORMATION DEDUPLICATION &  ======================================================== #
 
+# FIXMATEINFO
+rule fixmateinfo:
+    params:
+        name="fixmateinfo{sample}",   
+        partition="normal",
+        out= logs_dir+"mapped/{sample}_fixmateinfo.log",
+        err= logs_dir+"mapped/{sample}_fixmateinfo.err",
+        time="3:00:00", 
+        mem="14G",          # pour tous les éch (car fichiers .bam taille entre 22G-5G environ)
+        cpus="2",
+        # Paths originaux pour cleanup ensuite
+        original_bam=data_dir+"mapped/{sample}.sorted.bam",
+        original_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+    input:
+        bam=data_dir+"mapped/{sample}.sorted.bam"
+    output:
+        fixmateinfo_bam= data_dir+"mapped/{sample}.sorted.fixmateinfo.bam",
+        # Sentinel file
+        done= touch(data_dir+"mapped/{sample}.fixmateinfo_ok.flag")
+    conda: "picard_env.yaml"
+    benchmark:
+        benchmarks_dir+"mapped/{sample}_fixmateinfo.tsv"
+    shell:
+        """
+        # Picard FixMateInformation
+        picard FixMateInformation \
+            I={input.bam} \
+            O={output.fixmateinfo_bam} \
+            SO=coordinate \
+            VALIDATION_STRINGENCY = LENIENT
+        
+        # Verifications outputs ok
+        if [ -s {output.fixmateinfo_bam} ] ; then
+            # Suppresion des fichiers .bam & .bai originaux:
+            rm -f {params.original_bam} {params.original_bai}
+        else
+            echo "Error: Output files not generated properly" > {params.err}
+            exit 1
+        fi
+        """
+        
 rule deduplicate:
     params:
         name="deduplicate{sample}",   
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="4:00:00", 
-        mem="8G", 
-        cpus="2",
+        time="3:00:00", 
+        mem="10G",      # pour tous les éch (temps de 1h à 2,5h environ)
+        cpus="8",
         # Paths originaux pour cleanup ensuite
-        original_bam=data_dir+"mapped/{sample}.sorted.bam",
-        original_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.bam",
-        bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+        bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     output:
         marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
         marked_bai=data_dir+"deduplicated/{sample}.markedDup.bam.bai",
         metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
         # Sentinel file
-        done=touch(data_dir+"deduplicated/{sample}.dedup_complete.flag")
+        done=touch(data_dir+"deduplicated/{sample}.dedup_ok.flag")
     conda: "picard_env.yaml"
     benchmark:
         benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
@@ -248,52 +287,7 @@ rule deduplicate:
         # Verifications outputs ok
         if [ -s {output.marked_bam} ] && [ -s {output.marked_bai} ]; then
             # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.original_bam} {params.original_bai}
-        else
-            echo "Error: Output files not generated properly" > {params.err}
-            exit 1
-        fi
-        """
-
-
-# FIXMATEINFO
-rule fixmateinfo:
-    params:
-        name="fixmateinfo{sample}",   
-        partition="normal",
-        out= logs_dir+"deduplicate/{sample}_fixmateinfo.log",
-        err= logs_dir+"deduplicate/{sample}_fixmateinfo.err",
-        time="3:0:00", 
-        mem="5G", 
-        cpus="2",
-        # Paths originaux pour cleanup ensuite
-        dedup_bam=data_dir+"mapped/{sample}.markedDup.bam",
-        dedup_bai=data_dir+"mapped/{sample}.markedDup.bam.bai"
-    input:
-        bam= data_dir+"deduplicated/{sample}.markedDup.bam",            
-        bai= data_dir+"../data/deduplicated/{sample}.markedDup.bam.bai"
-    output:
-        final_bam= data_dir+"deduplicated/{sample}.dedup.bam",
-        final_bai= data_dir+"deduplicated/{sample}.dedup.bam.bai",
-        # Sentinel file
-        done= touch(data_dir+"deduplicated/{sample}.final_complete.flag")
-    conda: "picard_env.yaml"
-    benchmark:
-        benchmarks_dir+"deduplicate/{sample}_fixmateinfo.tsv"
-    shell:
-        """
-        # Picard FixMateInformation
-        picard FixMateInformation \
-            I={input.bam} \
-            O={output.final_bam} \
-            SO=coordinate \
-            VALIDATION_STRINGENCY = LENIENT \
-            CREATE_INDEX=true
-        
-        # Verifications outputs ok
-        if [ -s {output.final_bam} ] && [ -s {output.final_bai} ]; then
-            # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.dedup_bam} {params.dedup_bai}
+            rm -f {params.fixmateinfo_bam}
         else
             echo "Error: Output files not generated properly" > {params.err}
             exit 1

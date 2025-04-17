@@ -13,7 +13,7 @@ qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
 
 
 # Conda environments:
-conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        # pas encore créé!
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
 
 # Logiciels utilisés:
 fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
@@ -56,7 +56,7 @@ print(SAMPLES)
 rule all:
     input:
         # INDEX
-        expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
+        expand(data_dir+"mapped/{sample}.sorted.fixmateinfo.bam", sample=SAMPLES)
 
 
 # ======================================================== CONTROLE QUALITE & NETTOYAGE READS ======================================================== #
@@ -76,7 +76,7 @@ rule fastqc:
     output:
         html= qc_dir+"fastqc/{sample}_fastqc.html",
         zip= qc_dir+"fastqc/{sample}_fastqc.zip"
-    conda: "fastqc_env.yaml"
+    conda: conda_dir+"fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc/{sample}.tsv"
     shell:
@@ -126,7 +126,7 @@ rule fastqc_after_cleaning:     # fastqc téléchargé sur pbil-deb mais pas sur
     output:
         html= qc_dir+"fastqc_clean/{sample}_fastqc.html",
         zip= qc_dir+"fastqc_clean/{sample}_fastqc.zip"
-    conda: "fastqc_env.yaml"
+    conda: conda_dir+"fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc_after_cleaning/{sample}.tsv"
     shell:
@@ -152,12 +152,12 @@ rule mapping:
     input:
         r1= data_dir+"clean/{sample}_R1_clean.fastq.gz",
         r2= data_dir+"clean/{sample}_R2_clean.fastq.gz",
-        ref="/beegfs/data/nroscigni/bedbugs/quality_control/data/ref_genome/Cimex_ref_genome.fa"
+        ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
         bam= data_dir+"mapped/{sample}.sorted.bam",
         # Sentinel file si ok!
         done= touch(data_dir+"mapped/{sample}_cleanup.done")
-    conda: "mapping_env.yaml"
+    conda: conda_dir+"mapping_env.yaml"
     benchmark:
         benchmarks_dir+"mapping/{sample}.tsv"
     shell:
@@ -189,7 +189,7 @@ rule index:
         sorted_bam= data_dir+"mapped/{sample}.sorted.bam"
     output:
         bai= data_dir+"mapped/{sample}.sorted.bam.bai"
-    conda: "mapping_env.yaml"
+    conda: conda_dir+"mapping_env.yaml"
     benchmark:
         benchmarks_dir+"mapping/{sample}_index.tsv"
     shell:
@@ -205,32 +205,28 @@ rule fixmateinfo:
     params:
         name="fixmateinfo{sample}",   
         partition="normal",
-        out= logs_dir+"mapped/{sample}_fixmateinfo.log",
-        err= logs_dir+"mapped/{sample}_fixmateinfo.err",
-        time="3:00:00", 
-        mem="14G",          # pour tous les éch (car fichiers .bam taille entre 22G-5G environ)
+        out=logs_dir+"mapping/{sample}_dedup.log",
+        err=logs_dir+"mapping/{sample}_dedup.err",
+        time="3:00:00",
+        mem="5G",         
         cpus="2",
         # Paths originaux pour cleanup ensuite
         sorted_bam=data_dir+"mapped/{sample}.sorted.bam",
         sorted_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.bam"
+        sorted_bam=data_dir+"mapped/{sample}.sorted.bam"
     output:
         fixmateinfo_bam= data_dir+"mapped/{sample}.sorted.fixmateinfo.bam",
         # Sentinel file
         done= touch(data_dir+"mapped/{sample}.fixmateinfo_ok.flag")
-    conda: "picard_env.yaml"
+    conda: conda_dir+"picard_env.yaml"
     benchmark:
-        benchmarks_dir+"mapped/{sample}_fixmateinfo.tsv"
+        benchmarks_dir+"mapping/{sample}_fixmateinfo.tsv"
     shell:
         """
-        # Picard FixMateInformation
-        picard FixMateInformation \
-            I={input.bam} \
-            O={output.fixmateinfo_bam} \
-            SO=coordinate \
-            VALIDATION_STRINGENCY = LENIENT
-        
+        # Picard FixMateInfo
+        picard FixMateInformation --INPUT {input.sorted_bam} --OUTPUT {output.fixmateinfo_bam} --SORT_ORDER coordinate --VALIDATION_STRINGENCY LENIENT > {params.out} 2> {params.err} 
+
         # Verifications outputs ok
         if [ -s {output.fixmateinfo_bam} ] ; then
             # Suppresion des fichiers .bam & .bai originaux:
@@ -260,7 +256,7 @@ rule deduplicate:
         metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
         # Sentinel file
         done=touch(data_dir+"deduplicated/{sample}.dedup_ok.flag")
-    conda: "picard_env.yaml"
+    conda: conda_dir+"picard_env.yaml"
     benchmark:
         benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
     shell:

@@ -3,7 +3,7 @@
 
 # ===== DEFINITION DES ECHANTILLONS ===== #
 # Tous les samples {sample}.fastq.gz)
-SAMPLES = ['Cimex226']
+SAMPLES = ['Cimex18-18']
 
 print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
 print(SAMPLES, type(SAMPLES))
@@ -20,7 +20,7 @@ qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
 
 
 # Conda environments:
-conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        # à créer!
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
 
 # Logiciels utilisés:
 fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
@@ -39,7 +39,7 @@ benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
 rule all:
     input:
         # FixMateInfo & Dedup:
-        expand(data_dir+"deduplicated/{sample}.dedup_ok.flag", sample= SAMPLES)
+        expand(data_dir+"deduplicated/{sample}.markedDup.bam", sample= SAMPLES)
 
         # FASTQC
         # expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
@@ -73,7 +73,7 @@ rule fastqc:
     output:
         html= qc_dir+"fastqc/{sample}_fastqc.html",
         zip= qc_dir+"fastqc/{sample}_fastqc.zip"
-    #conda: "fastqc_env.yaml"
+    conda: conda_dir+"fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc/{sample}.tsv"
     shell:
@@ -105,7 +105,7 @@ rule clean:
     shell:
         """
         mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/clean/"
-        fastp_dir -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2} -j {output.json} -h {output.html} --length_required 50    # sans dedup, avec minimum de 50bp 
+        /beegfs/home/varaldi/TOOLS/fastp -i {input.r1} -I {input.r2} -o {output.r1} -O {output.r2} -j {output.json} -h {output.html} --length_required 50    # sans dedup, avec minimum de 50bp 
         """
 
 # CONTROLE QUALITE APRES NETTOYAGE
@@ -123,7 +123,7 @@ rule fastqc_after_cleaning:     # fastqc téléchargé sur pbil-deb mais pas sur
     output:
         html= qc_dir+"fastqc_clean/{sample}_fastqc.html",
         zip= qc_dir+"fastqc_clean/{sample}_fastqc.zip"
-    #conda: "fastqc_env.yaml"
+    conda: conda_dir+"fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc_after_cleaning/{sample}.tsv"
     shell:
@@ -154,7 +154,7 @@ rule mapping:
         bam= data_dir+"mapped/{sample}.sorted.bam",
         # Sentinel file si ok!
         done= touch(data_dir+"mapped/{sample}_cleanup.done")
-    # conda: "mapping_env.yaml"
+    conda: conda_dir+"mapping_env.yaml"
     benchmark:
         benchmarks_dir+"mapping/{sample}.tsv"
     shell:
@@ -202,36 +202,27 @@ rule fixmateinfo:
     params:
         name="fixmateinfo{sample}",   
         partition="normal",
-        time="3:00:00", 
-        mem="14G",          # pour tous les éch (car fichiers .bam taille entre 22G-5G environ)
+        out=logs_dir+"mapping/{sample}_dedup.log",
+        err=logs_dir+"mapping/{sample}_dedup.err",
+        time="3:00:00",
+        mem="5G",         
         cpus="2",
-        java_mem="12G",  # Recommended for Picard
         # Paths originaux pour cleanup ensuite
         sorted_bam=data_dir+"mapped/{sample}.sorted.bam",
         sorted_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
-    log:
-        main=logs_dir+"mapped/{sample}_fixmateinfo.log",
-        err=logs_dir+"mapped/{sample}_fixmateinfo.err"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.bam"
+        sorted_bam=data_dir+"mapped/{sample}.sorted.bam"
     output:
         fixmateinfo_bam= data_dir+"mapped/{sample}.sorted.fixmateinfo.bam",
         # Sentinel file
         done= touch(data_dir+"mapped/{sample}.fixmateinfo_ok.flag")
-    conda: "picard_env.yaml"
+    conda: conda_dir+"picard_env.yaml"
     benchmark:
-        benchmarks_dir+"mapped/{sample}_fixmateinfo.tsv"
+        benchmarks_dir+"mapping/{sample}_fixmateinfo.tsv"
     shell:
         """
-        mkdir -p {output.fixmateinfo_bam})
-
         # Picard FixMateInfo
-        picard -Xmx{params.java_mem} FixMateInformation \
-            -I {input.bam} \
-            -O {fixmateinfo_bam} \
-            -SO coordinate \
-            --VALIDATION_STRINGENCY LENIENT \
-            > {log.main} 2> {log.err} || exit 1
+        picard FixMateInformation --INPUT {input.sorted_bam} --OUTPUT {output.fixmateinfo_bam} --SORT_ORDER coordinate --VALIDATION_STRINGENCY LENIENT > {params.out} 2> {params.err} 
 
         # Verifications outputs ok
         if [ -s {output.fixmateinfo_bam} ] ; then
@@ -249,39 +240,28 @@ rule deduplicate:
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="3:00:00", 
-        mem="10G",      # pour tous les éch (temps de 1h à 2,5h environ)
+        time="5:00:00", 
+        mem="10G",      
         cpus="8",
         # Paths originaux pour cleanup ensuite
         fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
+        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     output:
         marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
-        marked_bai=data_dir+"deduplicated/{sample}.markedDup.bam.bai",
+        marked_bai=data_dir+"deduplicated/{sample}.markedDup.bai",
         metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
         # Sentinel file
         done=touch(data_dir+"deduplicated/{sample}.dedup_ok.flag")
-    conda: "picard_env.yaml"
+    conda: conda_dir+"picard_env.yaml"
     benchmark:
         benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
     shell:
         """
-        mkdir -p {output.marked_bam})
-        
-        # Picard MarkDuplicates
-        picard MarkDuplicates \
-            INPUT={input.bam} \
-            OUTPUT={output.marked_bam} \
-            METRICS_FILE={output.metrics} \
-            CREATE_INDEX=true
-        
-        # Verifications outputs ok
-        if [ -s {output.marked_bam} ] && [ -s {output.marked_bai} ]; then
-            # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.fixmateinfo_bam}
-        else
-            echo "Error: Output files not generated properly" > {params.err}
-            exit 1
-        fi
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/"
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/deduplicate/"
+
+        # Picard MarkDup
+        picard MarkDuplicates --INPUT {input.fixmateinfo_bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}
         """
+        

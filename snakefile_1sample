@@ -3,8 +3,9 @@
 
 # ===== DEFINITION DES ECHANTILLONS ===== #
 # Tous les samples {sample}.fastq.gz)
-SAMPLES = ['Cimex443']
+SAMPLES = ['Cimex226']
 
+print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
 print(SAMPLES, type(SAMPLES))
 
 # ===== DEFINITION DES PATHS ===== #
@@ -37,9 +38,12 @@ benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
 # RULE ALL, appel le reste des règles
 rule all:
     input:
+        # FixMateInfo & Dedup:
+        expand(data_dir+"deduplicated/{sample}.dedup_ok.flag", sample= SAMPLES)
+
         # FASTQC
-        expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
-        expand(qc_dir+"fastqc/{sample}_R2_fastqc.zip", sample=SAMPLES),
+        # expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
+        # expand(qc_dir+"fastqc/{sample}_R2_fastqc.zip", sample=SAMPLES),
         # CLEAN
         # expand(data_dir+"clean/{sample}_R1_clean.fastq.gz", sample=SAMPLES),
         # expand(data_dir+"clean/{sample}_R2_clean.fastq.gz", sample=SAMPLES),
@@ -48,10 +52,9 @@ rule all:
         # expand(qc_dir+"fastqc_clean/{sample}_R2_clean_fastqc.zip", sample=SAMPLES),
         
         # MAPPING & TRI
-        expand(data_dir+"mapped/{sample}.sorted.bam", sample=SAMPLES),
+        # expand(data_dir+"mapped/{sample}.sorted.bam", sample=SAMPLES),
         # INDEX
-        expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
-
+        #expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
 
 # ======================================================== CONTROLE QUALITE & NETTOYAGE READS ======================================================== #
 
@@ -70,7 +73,7 @@ rule fastqc:
     output:
         html= qc_dir+"fastqc/{sample}_fastqc.html",
         zip= qc_dir+"fastqc/{sample}_fastqc.zip"
-    conda: "fastqc_env.yaml"
+    #conda: "fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc/{sample}.tsv"
     shell:
@@ -120,7 +123,7 @@ rule fastqc_after_cleaning:     # fastqc téléchargé sur pbil-deb mais pas sur
     output:
         html= qc_dir+"fastqc_clean/{sample}_fastqc.html",
         zip= qc_dir+"fastqc_clean/{sample}_fastqc.zip"
-    conda: "fastqc_env.yaml"
+    #conda: "fastqc_env.yaml"
     benchmark:
         benchmarks_dir+"fastqc_after_cleaning/{sample}.tsv"
     shell:
@@ -141,7 +144,7 @@ rule mapping:
         err= logs_dir+"mapping/{sample}.err",
         rg="@RG\\tID:{sample}\\tSM:{sample}\\tPL:ILLUMINA",
         time="9:00:00",
-        mem="17gG",
+        mem="16G",
         cpus="8"
     input:
         r1= data_dir+"clean/{sample}_R1_clean.fastq.gz",
@@ -151,7 +154,7 @@ rule mapping:
         bam= data_dir+"mapped/{sample}.sorted.bam",
         # Sentinel file si ok!
         done= touch(data_dir+"mapped/{sample}_cleanup.done")
-    conda: "mapping_env.yaml"
+    # conda: "mapping_env.yaml"
     benchmark:
         benchmarks_dir+"mapping/{sample}.tsv"
     shell:
@@ -192,35 +195,79 @@ rule index:
         """
 
 
-# ======================================================== DEDUPLICATION & FIXMATEINFORMATION ======================================================== #
+# ======================================================== FIXMATEINFORMATION DEDUPLICATION &  ======================================================== #
 
+# FIXMATEINFO
+rule fixmateinfo:
+    params:
+        name="fixmateinfo{sample}",   
+        partition="normal",
+        time="3:00:00", 
+        mem="14G",          # pour tous les éch (car fichiers .bam taille entre 22G-5G environ)
+        cpus="2",
+        java_mem="12G",  # Recommended for Picard
+        # Paths originaux pour cleanup ensuite
+        sorted_bam=data_dir+"mapped/{sample}.sorted.bam",
+        sorted_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+    log:
+        main=logs_dir+"mapped/{sample}_fixmateinfo.log",
+        err=logs_dir+"mapped/{sample}_fixmateinfo.err"
+    input:
+        bam=data_dir+"mapped/{sample}.sorted.bam"
+    output:
+        fixmateinfo_bam= data_dir+"mapped/{sample}.sorted.fixmateinfo.bam",
+        # Sentinel file
+        done= touch(data_dir+"mapped/{sample}.fixmateinfo_ok.flag")
+    conda: "picard_env.yaml"
+    benchmark:
+        benchmarks_dir+"mapped/{sample}_fixmateinfo.tsv"
+    shell:
+        """
+        mkdir -p {output.fixmateinfo_bam})
+
+        # Picard FixMateInfo
+        picard -Xmx{params.java_mem} FixMateInformation \
+            -I {input.bam} \
+            -O {fixmateinfo_bam} \
+            -SO coordinate \
+            --VALIDATION_STRINGENCY LENIENT \
+            > {log.main} 2> {log.err} || exit 1
+
+        # Verifications outputs ok
+        if [ -s {output.fixmateinfo_bam} ] ; then
+            # Suppresion des fichiers .bam & .bai originaux:
+            rm -f {params.sorted_bam} {params.sorted_bai}
+        else
+            echo "Error: Output files not generated properly" > {params.err}
+            exit 1
+        fi
+        """
+        
 rule deduplicate:
     params:
         name="deduplicate{sample}",   
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="4:00:00", 
-        mem="8G", 
-        cpus="2",
+        time="3:00:00", 
+        mem="10G",      # pour tous les éch (temps de 1h à 2,5h environ)
+        cpus="8",
         # Paths originaux pour cleanup ensuite
-        original_bam=data_dir+"mapped/{sample}.sorted.bam",
-        original_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.bam",
-        bai=data_dir+"mapped/{sample}.sorted.bam.bai"
+        bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     output:
         marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
         marked_bai=data_dir+"deduplicated/{sample}.markedDup.bam.bai",
         metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
         # Sentinel file
-        done=touch(data_dir+"deduplicated/{sample}.dedup_complete.flag")
+        done=touch(data_dir+"deduplicated/{sample}.dedup_ok.flag")
     conda: "picard_env.yaml"
     benchmark:
         benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
     shell:
         """
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/"
+        mkdir -p {output.marked_bam})
         
         # Picard MarkDuplicates
         picard MarkDuplicates \
@@ -232,55 +279,9 @@ rule deduplicate:
         # Verifications outputs ok
         if [ -s {output.marked_bam} ] && [ -s {output.marked_bai} ]; then
             # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.original_bam} {params.original_bai}
+            rm -f {params.fixmateinfo_bam}
         else
             echo "Error: Output files not generated properly" > {params.err}
             exit 1
         fi
         """
-
-
-# FIXMATEINFO
-rule fixmateinfo:
-    params:
-        name="fixmateinfo{sample}",   
-        partition="normal",
-        out= logs_dir+"deduplicate/{sample}_fixmateinfo.log",
-        err= logs_dir+"deduplicate/{sample}_fixmateinfo.err",
-        time="3:0:00", 
-        mem="5G", 
-        cpus="2",
-        # Paths originaux pour cleanup ensuite
-        dedup_bam=data_dir+"mapped/{sample}.markedDup.bam",
-        dedup_bai=data_dir+"mapped/{sample}.markedDup.bam.bai"
-    input:
-        bam= data_dir+"deduplicated/{sample}.markedDup.bam",            
-        bai= data_dir+"../data/deduplicated/{sample}.markedDup.bam.bai"
-    output:
-        final_bam= data_dir+"deduplicated/{sample}.dedup.bam",
-        final_bai= data_dir+"deduplicated/{sample}.dedup.bam.bai",
-        # Sentinel file
-        done= touch(data_dir+"deduplicated/{sample}.final_complete.flag")
-    conda: "picard_env.yaml"
-    benchmark:
-        benchmarks_dir+"deduplicate/{sample}_fixmateinfo.tsv"
-    shell:
-        """
-        # Picard FixMateInformation
-        picard FixMateInformation \
-            I={input.bam} \
-            O={output.final_bam} \
-            SO=coordinate \
-            VALIDATION_STRINGENCY = LENIENT \
-            CREATE_INDEX=true
-        
-        # Verifications outputs ok
-        if [ -s {output.final_bam} ] && [ -s {output.final_bai} ]; then
-            # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.dedup_bam} {params.dedup_bai}
-        else
-            echo "Error: Output files not generated properly" > {params.err}
-            exit 1
-        fi
-        """
-        

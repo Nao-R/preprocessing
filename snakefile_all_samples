@@ -30,19 +30,21 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
+SAMPLES = DATA
 
-# Samples excluded (ici BATCH MOYEN donc définition liste directement)
-SAMPLES_INCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
+# SI BESOIN samples à inclure/exclure:  
+# SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
 
 # Path where BAM files should exist
 BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
 
-# Only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
-SAMPLES = [
-    sample for sample in DATA 
-    if (sample in SAMPLES_INCLUDED)
-    and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))
-]
+# SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
+# ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
+# SAMPLES = [
+    #sample for sample in DATA 
+    #if (sample in SAMPLES_INCLUDED)
+    #and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))]
+
 print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
 print(SAMPLES)
 
@@ -53,18 +55,6 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     input:
-        # FASTQC
-        expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
-        expand(qc_dir+"fastqc/{sample}_R2_fastqc.zip", sample=SAMPLES),
-        # CLEAN
-        expand(data_dir+"clean/{sample}_R1_clean.fastq.gz", sample=SAMPLES),
-        expand(data_dir+"clean/{sample}_R2_clean.fastq.gz", sample=SAMPLES),
-        # FASTQC AFTER CLEANING
-        expand(qc_dir+"fastqc_clean/{sample}_R1_clean_fastqc.html", sample=SAMPLES),
-        expand(qc_dir+"fastqc_clean/{sample}_R2_clean_fastqc.zip", sample=SAMPLES),
-        
-        # MAPPING & TRI
-        expand(data_dir+"mapped/{sample}.sorted.bam", sample=SAMPLES),
         # INDEX
         expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
 
@@ -192,8 +182,8 @@ rule index:
         partition="normal",
         out= logs_dir+"mapping/{sample}_index.log",
         err= logs_dir+"mapping/{sample}_index.err",
-        time="00:10:00",
-        mem="150M",
+        time="00:07:00",
+        mem="100M",
         cpus="1"
     input:
         sorted_bam= data_dir+"mapped/{sample}.sorted.bam"
@@ -293,4 +283,3 @@ rule deduplicate:
             exit 1
         fi
         """
-        

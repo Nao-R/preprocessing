@@ -243,16 +243,16 @@ rule deduplicate:
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="3:00:00", 
-        mem="10G",      # pour tous les éch (temps de 1h à 2,5h environ)
-        cpus="8",
+        time="00:05:00", 
+        mem="2G",      
+        cpus="2",
         # Paths originaux pour cleanup ensuite
         fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     input:
-        bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
+        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     output:
         marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
-        marked_bai=data_dir+"deduplicated/{sample}.markedDup.bam.bai",
+        marked_bai=data_dir+"deduplicated/{sample}.markedDup.bai",
         metrics=data_dir+"deduplicated/{sample}.markDup_metrics.txt",
         # Sentinel file
         done=touch(data_dir+"deduplicated/{sample}.dedup_ok.flag")
@@ -262,20 +262,18 @@ rule deduplicate:
     shell:
         """
         mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/"
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/deduplicate/"
+
+        # Picard MarkDup
+        picard MarkDuplicates --INPUT {input.fixmateinfo_bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}
         
-        # Picard MarkDuplicates
-        picard MarkDuplicates \
-            INPUT={input.bam} \
-            OUTPUT={output.marked_bam} \
-            METRICS_FILE={output.metrics} \
-            CREATE_INDEX=true
-        
-        # Verifications outputs ok
-        if [ -s {output.marked_bam} ] && [ -s {output.marked_bai} ]; then
-            # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.fixmateinfo_bam}
+        # Check if BOTH .bam and .bai exist AND are non-empty
+        if [ -s "{output.marked_bam}" ] && [ -s "{output.marked_bai}" ]; then
+            echo "Dedup ok, suppression fichiers fixmateinfos" >> {params.err}
+            rm -f "{params.fixmateinfo_bam}"
         else
-            echo "Error: Output files not generated properly" > {params.err}
+            echo "ERROR: un des fichiers .bam ou bai non présent ou vide!!" >> {params.err}
             exit 1
         fi
         """
+        

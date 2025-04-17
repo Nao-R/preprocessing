@@ -240,9 +240,9 @@ rule deduplicate:
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="5:00:00", 
-        mem="10G",      
-        cpus="8",
+        time="00:05:00", 
+        mem="2G",      
+        cpus="2",
         # Paths originaux pour cleanup ensuite
         fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
     input:
@@ -263,5 +263,14 @@ rule deduplicate:
 
         # Picard MarkDup
         picard MarkDuplicates --INPUT {input.fixmateinfo_bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}
+        
+        # Check if BOTH .bam and .bai exist AND are non-empty
+        if [ -s "{output.marked_bam}" ] && [ -s "{output.marked_bai}" ]; then
+            echo "Dedup ok, suppression fichiers fixmateinfos" >> {params.err}
+            rm -f "{params.fixmateinfo_bam}"
+        else
+            echo "ERROR: un des fichiers .bam ou bai non présent ou vide!!" >> {params.err}
+            exit 1
+        fi
         """
         

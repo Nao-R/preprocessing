@@ -1,0 +1,89 @@
+
+# COMMANDES LANCEMENT
+# snakemake -s snakefile_1sample --rerun-triggers mtime --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.cpus} -o {params.out} -e {params.err}" --jobs 1 --use-conda --conda-frontend conda -np 
+
+# ===== DEFINITION DES PATHS ===== #
+
+# Raw data:
+raw_dir="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/"           # données brutes chez JV     
+# New data:
+data_dir="/beegfs/data/nroscigni/bedbugs/quality_control/data/"
+# Outputs contrôle qualité
+qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
+# Conda environments:
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
+# Logiciels utilisés:
+fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
+# Logs:
+logs_dir="/beegfs/data/nroscigni/bedbugs/quality_control/logs/"
+# Benchmarks 
+benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
+
+# ===== DEFINITION DES ECHANTILLONS ===== #
+import os
+
+# All FASTQ samples
+DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
+SAMPLES = DATA
+
+# SI BESOIN samples à inclure/exclure:  
+# SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
+
+# Path where BAM files should exist
+BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
+
+# SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
+# ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
+# SAMPLES = [
+    #sample for sample in DATA 
+    #if (sample in SAMPLES_INCLUDED)
+    #and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))]
+
+print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
+print(SAMPLES)
+
+
+# =================================================================== RULE ALL =================================================================== #
+
+
+# RULE ALL, appel le reste des règles
+rule all:
+    # Variant calling
+    input: expand("results/variants/{sample}.raw.vcf.gz", sample= SAMPLES)
+
+
+# =================================================================== VARIANT CALLING =================================================================== #
+
+# VARIANT CALLING
+rule variant_calling:
+    params:
+        name="variant_calling{sample}",   
+        partition="normal",
+        out=logs_dir+"variant_calling/{sample}.log",
+        err=logs_dir+"variant_calling/{sample}.err",
+        time="10:00:00", 
+        mem="15G",      
+        cpus="3",
+        min_mq= "20",       # Min mapping quality
+        min_bq= "20",       # Min base quality
+        extra = "--max-depth 1000 --adjust-MQ 50"  # Optional
+    input:
+        bam= data_dir+"/deduplicated/{sample}.markedDup.bam",
+        bai= data_dir+"/deduplicated/{sample}.markedDup.bam.bai",
+        ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
+    output:
+        bcf = datat_dir+"variants/per_sample/{sample}.vcf.gz",
+    conda: conda_dir+"variant_calling_env.yaml"  
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/vcf/"
+
+        bcftools mpileup \
+            -f {input.ref} \
+            -q {params.min_mq} \
+            -Q {params.min_bq} \
+            {params.extra} \
+            {input.bam} | \
+        bcftools call -mv -Oz -o {output.vcf} \
+            2> {log}
+        """

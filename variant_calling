@@ -49,10 +49,10 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     # Variant calling
-    input: expand("results/variants/{sample}.raw.vcf.gz", sample= SAMPLES)
+    input: expand("results/variants/{sample}.vcf.gz", sample= SAMPLES)
 
 
-# =================================================================== VARIANT CALLING =================================================================== #
+# ======================================================== VARIANT CALLING & FILTERING ========================================================== #
 
 # VARIANT CALLING
 rule variant_calling:
@@ -63,10 +63,7 @@ rule variant_calling:
         err=logs_dir+"variant_calling/{sample}.err",
         time="10:00:00", 
         mem="15G",      
-        cpus="3",
-        min_mq= "20",       # Min mapping quality
-        min_bq= "20",       # Min base quality
-        extra = "--max-depth 1000 --adjust-MQ 50"  # Optional
+        cpus="3"
     input:
         bam= data_dir+"/deduplicated/{sample}.markedDup.bam",
         bai= data_dir+"/deduplicated/{sample}.markedDup.bam.bai",
@@ -78,12 +75,27 @@ rule variant_calling:
         """
         mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/vcf/"
 
-        bcftools mpileup \
-            -f {input.ref} \
-            -q {params.min_mq} \
-            -Q {params.min_bq} \
-            {params.extra} \
-            {input.bam} | \
-        bcftools call -mv -Oz -o {output.vcf} \
-            2> {log}
+        bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -mv --ploidy 2 -Ob -o {output.bcf}
+        """
+
+# VARIANT FILTERING
+rule variant_filter:
+        name="variant_filtering{sample}",   
+        partition="normal",
+        out=logs_dir+"variant_calling/{sample}.filtered.log",
+        err=logs_dir+"variant_calling/{sample}filtered.err",
+        time="10:00:00", 
+        mem="15G",      
+        cpus="3",
+        min_qual= 30,      # min quality score
+        min_dp= 5,         # min depth per sample
+        max_dp= 100,       # max depth
+        min_maf= 0.05      # min minor allele frequency (5%)
+    input:
+        "results/variant_calling/raw_calls.bcf"  # From your calling step
+    output:
+        "results/variant_filtering/filtered_variants.vcf.gz"
+    shell:
+        """
+        bcftools filter -e QUAL<{params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' | \
         """

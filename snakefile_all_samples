@@ -243,8 +243,8 @@ rule deduplicate:
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="00:05:00", 
-        mem="2G",      
+        time="03:30:00",
+        mem="4G",     
         cpus="2",
         # Paths originaux pour cleanup ensuite
         fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"

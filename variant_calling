@@ -24,7 +24,7 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = ['Cimex142']
+SAMPLES = ['Cimex18-18']
 
 # SI BESOIN samples à inclure/exclure:  
 # SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}

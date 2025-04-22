@@ -33,17 +33,16 @@ DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R
 SAMPLES = DATA
 
 # SI BESOIN samples à inclure/exclure:  
-# SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
+SAMPLES_EXCLUDED = {'Cimex443'}
 
 # Path where BAM files should exist
 BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
 
 # SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
 # ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
-# SAMPLES = [
-    #sample for sample in DATA 
-    #if (sample in SAMPLES_INCLUDED)
-    #and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))]
+SAMPLES = [
+    sample for sample in DATA 
+    if (sample not in SAMPLES_EXCLUDED)]
 
 print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
 print(SAMPLES)
@@ -55,8 +54,8 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     input:
-        # INDEX
-        expand(data_dir+"mapped/{sample}.sorted.fixmateinfo.bam", sample=SAMPLES)
+        # FixMateInfo & Dedup:
+        expand(data_dir+"deduplicated/{sample}.markedDup.bam", sample= SAMPLES)
 
 
 # ======================================================== CONTROLE QUALITE & NETTOYAGE READS ======================================================== #
@@ -208,7 +207,7 @@ rule fixmateinfo:
         out=logs_dir+"mapping/{sample}_dedup.log",
         err=logs_dir+"mapping/{sample}_dedup.err",
         time="3:00:00",
-        mem="5G",         
+        mem="4G",         
         cpus="2",
         # Paths originaux pour cleanup ensuite
         sorted_bam=data_dir+"mapped/{sample}.sorted.bam",

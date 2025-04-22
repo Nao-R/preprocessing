@@ -24,7 +24,7 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = DATA
+SAMPLES = ['Cimex142']
 
 # SI BESOIN samples à inclure/exclure:  
 # SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
@@ -49,7 +49,7 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     # Variant calling
-    input: expand("results/variants/{sample}.vcf.gz", sample= SAMPLES)
+    input: expand(data_dir+"variants/{sample}.bcf", sample= SAMPLES)
 
 
 # ======================================================== VARIANT CALLING & FILTERING ========================================================== #
@@ -61,25 +61,26 @@ rule variant_calling:
         partition="normal",
         out=logs_dir+"variant_calling/{sample}.log",
         err=logs_dir+"variant_calling/{sample}.err",
-        time="10:00:00", 
+        time="12:00:00", 
         mem="15G",      
-        cpus="3"
+        cpus="8"
     input:
-        bam= data_dir+"/deduplicated/{sample}.markedDup.bam",
-        bai= data_dir+"/deduplicated/{sample}.markedDup.bam.bai",
+        bam= data_dir+"deduplicated/{sample}.markedDup.bam",
+        #bai= data_dir+"deduplicated/{sample}.markedDup.bai",
         ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
-        bcf = datat_dir+"variants/per_sample/{sample}.vcf.gz",
-    conda: conda_dir+"variant_calling_env.yaml"  
+        bcf= data_dir+"variants/{sample}.bcf",
+    conda: conda_dir+"variants_env.yaml"  
     shell:
         """
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/vcf/"
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/variants/"
 
         bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -mv --ploidy 2 -Ob -o {output.bcf}
         """
 
 # VARIANT FILTERING
 rule variant_filter:
+    params:
         name="variant_filtering{sample}",   
         partition="normal",
         out=logs_dir+"variant_calling/{sample}.filtered.log",
@@ -88,14 +89,22 @@ rule variant_filter:
         mem="15G",      
         cpus="3",
         min_qual= 30,      # min quality score
-        min_dp= 5,         # min depth per sample
-        max_dp= 100,       # max depth
-        min_maf= 0.05      # min minor allele frequency (5%)
+        min_dp= 5,         # min depth
+        max_dp= 80,        # max depth
+        min_maf= 0.05      # min minor allele frequency (5%)?
     input:
-        "results/variant_calling/raw_calls.bcf"  # From your calling step
+        bcf= data_dir+"variants/{sample}.bcf",
     output:
-        "results/variant_filtering/filtered_variants.vcf.gz"
+        vcf= data_dir+"variants/{sample}filtered.vcf.gz",
+    conda: conda_dir+"variants_env.yaml"  
     shell:
         """
-        bcftools filter -e QUAL<{params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' | \
+        # Convert BCF to VCF & apply filters
+        bcftools view {input.bcf} | \
+        
+        # Remove low-quality/depth variants
+        bcftools filter -e 'QUAL < {params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' | \
+        
+        # Filter by minor allele frequency and compress output
+        bcftools view -q {params.min_maf}:minor -Oz -o {output.vcf}
         """

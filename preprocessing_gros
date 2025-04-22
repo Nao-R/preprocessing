@@ -1,28 +1,52 @@
-# ===== COMMANDE LANCEMENT ===== #
-# snakemake -s snakefile_1sample --rerun-triggers mtime --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.cpus} -o {params.out} -e {params.err}" --jobs 1 --use-conda --conda-frontend conda -np 
-
-# ===== DEFINITION DES ECHANTILLONS ===== #
-# Tous les samples {sample}.fastq.gz)
-SAMPLES = ['Cimex18-18']
-
-print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
-print(SAMPLES, type(SAMPLES))
+# COMMANDES LANCEMENT
+# snakemake -s preprocessing_petis --rerun-triggers mtime --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.cpus} -o {params.out} -e {params.err}" --jobs 10 --use-conda --conda-frontend conda -np
 
 # ===== DEFINITION DES PATHS ===== #
 # Raw data:
 raw_dir="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/"           # données brutes chez JV     
+
 # New data:
 data_dir="/beegfs/data/nroscigni/bedbugs/quality_control/data/"
+
 # Outputs contrôle qualité
 qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
+
+
 # Conda environments:
 conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
+
 # Logiciels utilisés:
 fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
+
+
 # Logs:
 logs_dir="/beegfs/data/nroscigni/bedbugs/quality_control/logs/"
 # Benchmarks 
 benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
+
+
+# ===== DEFINITION DES ECHANTILLONS ===== #
+import os
+
+# All FASTQ samples
+DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
+SAMPLES = DATA
+
+# SI BESOIN samples à inclure/exclure:  
+SAMPLES_INCLUDED = {'Cimex18-7', 'Cimex443', 'Cimex18-21', 'Cimex18-35', 'Cimex41'}
+
+# Path where BAM files should exist
+BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
+
+# SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
+# ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
+SAMPLES = [
+    sample for sample in DATA 
+    if (sample in SAMPLES_INCLUDED)]
+
+print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
+print(SAMPLES)
+
 
 # =================================================================== RULE ALL =================================================================== #
 
@@ -30,23 +54,9 @@ benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
 # RULE ALL, appel le reste des règles
 rule all:
     input:
-        # FixMateInfo & Dedup:
+        # Dedup:
         expand(data_dir+"deduplicated/{sample}.markedDup.bam", sample= SAMPLES)
 
-        # FASTQC
-        # expand(qc_dir+"fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
-        # expand(qc_dir+"fastqc/{sample}_R2_fastqc.zip", sample=SAMPLES),
-        # CLEAN
-        # expand(data_dir+"clean/{sample}_R1_clean.fastq.gz", sample=SAMPLES),
-        # expand(data_dir+"clean/{sample}_R2_clean.fastq.gz", sample=SAMPLES),
-        # FASTQC AFTER CLEANING
-        # expand(qc_dir+"fastqc_clean/{sample}_R1_clean_fastqc.html", sample=SAMPLES),
-        # expand(qc_dir+"fastqc_clean/{sample}_R2_clean_fastqc.zip", sample=SAMPLES),
-        
-        # MAPPING & TRI
-        # expand(data_dir+"mapped/{sample}.sorted.bam", sample=SAMPLES),
-        # INDEX
-        #expand(data_dir+"mapped/{sample}.sorted.bam.bai", sample=SAMPLES)
 
 # ======================================================== CONTROLE QUALITE & NETTOYAGE READS ======================================================== #
 
@@ -81,9 +91,9 @@ rule clean:
         partition="normal",
         out=logs_dir+"clean/{sample}.log",
         err=logs_dir+"clean/{sample}.err",
-        time="2:20:00", 
-        mem="10G", 
-        cpus="2"
+        time="2:00:00", 
+        mem="30G",      # batch GROS
+        cpus="4"
     input:
         r1= raw_dir+"{sample}_R1.fastq.gz",
         r2= raw_dir+"{sample}_R2.fastq.gz"
@@ -136,12 +146,12 @@ rule mapping:
         err= logs_dir+"mapping/{sample}.err",
         rg="@RG\\tID:{sample}\\tSM:{sample}\\tPL:ILLUMINA",
         time="9:00:00",
-        mem="16G",
+        mem="17G",          # batch GROS
         cpus="8"
     input:
         r1= data_dir+"clean/{sample}_R1_clean.fastq.gz",
         r2= data_dir+"clean/{sample}_R2_clean.fastq.gz",
-        ref="/beegfs/data/nroscigni/bedbugs/quality_control/data/ref_genome/Cimex_ref_genome.fa"
+        ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
         bam= data_dir+"mapped/{sample}.sorted.bam",
         # Sentinel file si ok!
@@ -164,67 +174,7 @@ rule mapping:
         fi        
         """
 
-# INDEX
-rule index:
-    params:
-        name="index{sample}",   
-        partition="normal",
-        out= logs_dir+"mapping/{sample}_index.log",
-        err= logs_dir+"mapping/{sample}_index.err",
-        time="00:10:00",
-        mem="150M",
-        cpus="1"
-    input:
-        sorted_bam= data_dir+"mapped/{sample}.sorted.bam"
-    output:
-        bai= data_dir+"mapped/{sample}.sorted.bam.bai"
-    conda: "mapping_env.yaml"
-    benchmark:
-        benchmarks_dir+"mapping/{sample}_index.tsv"
-    shell:
-        """
-        samtools index {input.sorted_bam}
-        """
-
-
-# ======================================================== FIXMATEINFORMATION DEDUPLICATION &  ======================================================== #
-
-# FIXMATEINFO
-rule fixmateinfo:
-    params:
-        name="fixmateinfo{sample}",   
-        partition="normal",
-        out=logs_dir+"mapping/{sample}_dedup.log",
-        err=logs_dir+"mapping/{sample}_dedup.err",
-        time="3:30:00",
-        mem="4G",         
-        cpus="2",
-        # Paths originaux pour cleanup ensuite
-        sorted_bam=data_dir+"mapped/{sample}.sorted.bam",
-        sorted_bai=data_dir+"mapped/{sample}.sorted.bam.bai"
-    input:
-        sorted_bam=data_dir+"mapped/{sample}.sorted.bam"
-    output:
-        fixmateinfo_bam= data_dir+"mapped/{sample}.sorted.fixmateinfo.bam",
-        # Sentinel file
-        done= touch(data_dir+"mapped/{sample}.fixmateinfo_ok.flag")
-    conda: conda_dir+"picard_env.yaml"
-    benchmark:
-        benchmarks_dir+"mapping/{sample}_fixmateinfo.tsv"
-    shell:
-        """
-        # Picard FixMateInfo
-        picard FixMateInformation --INPUT {input.sorted_bam} --OUTPUT {output.fixmateinfo_bam} --SORT_ORDER coordinate --VALIDATION_STRINGENCY LENIENT > {params.out} 2> {params.err} 
-
-        # Verifications outputs ok
-        if [ -s {output.fixmateinfo_bam} ] ; then
-            # Suppresion des fichiers .bam & .bai originaux:
-            rm -f {params.sorted_bam} {params.sorted_bai}
-        else
-            echo "Error: Output files not generated properly" > {params.err}
-            exit 1
-        fi
-        """
+# ========================================================  DEDUPLICATION  ======================================================== #
         
 rule deduplicate:
     params:
@@ -232,13 +182,13 @@ rule deduplicate:
         partition="normal",
         out=logs_dir+"deduplicate/{sample}_dedup.log",
         err=logs_dir+"deduplicate/{sample}_dedup.err",
-        time="03:30:00",
+        time="04:30:00",                # ressources ne changent pas peu importe taille éch
         mem="4G",     
         cpus="2",
         # Paths originaux pour cleanup ensuite
-        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
+        bam= data_dir+"mapped/{sample}.sorted.bam",
     input:
-        fixmateinfo_bam=data_dir+"mapped/{sample}.sorted.fixmateinfo.bam"
+        bam= data_dir+"mapped/{sample}.sorted.bam",
     output:
         marked_bam=data_dir+"deduplicated/{sample}.markedDup.bam",
         marked_bai=data_dir+"deduplicated/{sample}.markedDup.bai",
@@ -254,12 +204,12 @@ rule deduplicate:
         mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/deduplicate/"
 
         # Picard MarkDup
-        picard MarkDuplicates --INPUT {input.fixmateinfo_bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}
+        picard MarkDuplicates --INPUT {input.bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}
         
         # Check if BOTH .bam and .bai exist AND are non-empty
         if [ -s "{output.marked_bam}" ] && [ -s "{output.marked_bai}" ]; then
-            echo "Dedup ok, suppression fichiers fixmateinfos" >> {params.err}
-            rm -f "{params.fixmateinfo_bam}"
+            echo "Dedup ok, suppression fichiers .bam originaux" >> {params.err}
+            rm -f "{params.bam}"
         else
             echo "ERROR: un des fichiers .bam ou bai non présent ou vide!!" >> {params.err}
             exit 1

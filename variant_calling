@@ -56,6 +56,7 @@ rule all:
 
 
 # CALCUL COUVERTURE & MEAN DEPTH
+# pour potentiellement enlever des échantillons avant mpileup sur tous
 rule stats_covdp:
     params:
         name="stats{sample}",   
@@ -63,7 +64,7 @@ rule stats_covdp:
         out=logs_dir+"stats_covdp/{sample}.log",
         err=logs_dir+"stats_covdp/{sample}.err",
         time="00:40:00", 
-        mem="3G",      
+        mem="1G",      
         cpus="1"
     input: 
         bam= data_dir+"deduplicated/{sample}.markedDup.bam",
@@ -81,28 +82,32 @@ rule stats_covdp:
 
 
 # VARIANT CALLING
-rule variant_calling:
+rule variant_calling_mpileup:
     params:
-        name="variant_calling{sample}",   
+        name="variant_calling_mpileup_Cimex",
         partition="normal",
-        out=logs_dir+"variant_calling/{sample}.log",
-        err=logs_dir+"variant_calling/{sample}.err",
-        time="04:00:00", 
-        mem="25G",      
+        out=logs_dir+"variant_calling/mpileup.log",
+        err=logs_dir+"variant_calling/mpileup.err",
+        time="08:00:00",  
+        mem="30G",        
         cpus="8"
     input:
-        bam= data_dir+"deduplicated/{sample}.markedDup.bam",
-        #bai= data_dir+"deduplicated/{sample}.markedDup.bai",
+        bams= expand(data_dir+"deduplicated/{sample}.markedDup.bam"),
         ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
-        bcf= data_dir+"variants/{sample}.bcf",
-    conda: conda_dir+"variants_env.yaml"   
+        bcf= data_dir+"variants/.bcf"
+    conda: conda_dir+"variants_env.yaml"
     shell:
         """
         mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/variants/
-        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/Ò
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/
 
-        bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -m --ploidy 2 -Ob -o {output.bcf} >{params.out} 2>{params.err}
+        bcftools mpileup \
+            --threads 20 \
+            -a FORMAT/AD,FORMAT/DP,FORMAT/SP,INFO/AD \ # specify tags
+            -f {input.ref} \ # reference genome
+        -b {input.bams} \
+
         """
 
 # VARIANT FILTERING

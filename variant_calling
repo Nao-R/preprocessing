@@ -24,7 +24,7 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = ['Cimex18-18']
+SAMPLES = ['Cimex18-21']
 
 # SI BESOIN samples à inclure/exclure:  
 # SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
@@ -49,10 +49,36 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     # Variant calling
-    input: expand(data_dir+"variants/{sample}.bcf", sample= SAMPLES)
+    input: expand(data_dir+"stats_covdp/{sample}.tsv", sample= SAMPLES)
 
 
 # ======================================================== VARIANT CALLING & FILTERING ========================================================== #
+
+
+# CALCUL COUVERTURE & MEAN DEPTH
+rule stats_covdp:
+    params:
+        name="stats{sample}",   
+        partition="normal",
+        out=logs_dir+"stats_covdp/{sample}.log",
+        err=logs_dir+"stats_covdp/{sample}.err",
+        time="00:40:00", 
+        mem="3G",      
+        cpus="1"
+    input: 
+        bam= data_dir+"deduplicated/{sample}.markedDup.bam",
+    output:
+        tsv= data_dir+"deduplicated/stats/{sample}.tsv"
+    conda: conda_dir+"variants_env.yaml"    
+    shell:
+        """
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/stats/"
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/stats_covdp/"
+
+        samtools coverage {input.bam} | head -n 16 > {output.tsv} >{params.out} 2>{params.err}
+        """
+
+
 
 # VARIANT CALLING
 rule variant_calling:
@@ -61,8 +87,8 @@ rule variant_calling:
         partition="normal",
         out=logs_dir+"variant_calling/{sample}.log",
         err=logs_dir+"variant_calling/{sample}.err",
-        time="12:00:00", 
-        mem="15G",      
+        time="04:00:00", 
+        mem="25G",      
         cpus="8"
     input:
         bam= data_dir+"deduplicated/{sample}.markedDup.bam",
@@ -70,12 +96,13 @@ rule variant_calling:
         ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
         bcf= data_dir+"variants/{sample}.bcf",
-    conda: conda_dir+"variants_env.yaml"  
+    conda: conda_dir+"variants_env.yaml"   
     shell:
         """
         mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/variants/"
+        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/"
 
-        bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -mv --ploidy 2 -Ob -o {output.bcf}
+        bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -m --ploidy 2 -Ob -o {output.bcf} >{params.out} 2>{params.err}
         """
 
 # VARIANT FILTERING
@@ -84,27 +111,21 @@ rule variant_filter:
         name="variant_filtering{sample}",   
         partition="normal",
         out=logs_dir+"variant_calling/{sample}.filtered.log",
-        err=logs_dir+"variant_calling/{sample}filtered.err",
+        err=logs_dir+"variant_calling/{sample}.filtered.err",
         time="10:00:00", 
         mem="15G",      
         cpus="3",
-        min_qual= 30,      # min quality score
-        min_dp= 5,         # min depth
-        max_dp= 80,        # max depth
-        min_maf= 0.05      # min minor allele frequency (5%)?
+        min_qual= 30,      # min quality score ok
+        min_dp= 5,         # min depth ok
+        max_dp= 80,        # estimation couv moy par éch & plot histogram (80 comme départ)
     input:
         bcf= data_dir+"variants/{sample}.bcf",
     output:
         vcf= data_dir+"variants/{sample}filtered.vcf.gz",
-    conda: conda_dir+"variants_env.yaml"  
+    conda: conda_dir+"variants_env.yaml" 
     shell:
         """
-        # Convert BCF to VCF & apply filters
-        bcftools view {input.bcf} | \
-        
-        # Remove low-quality/depth variants
-        bcftools filter -e 'QUAL < {params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' | \
-        
-        # Filter by minor allele frequency and compress output
-        bcftools view -q {params.min_maf}:minor -Oz -o {output.vcf}
+        bcftools view {input.bcf} | bcftools filter -e 'QUAL < {params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' >{params.out} 2>{params.err}
         """
+
+        

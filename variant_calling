@@ -24,7 +24,7 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = ['Cimex18-21']
+SAMPLES = ['Cimex443']
 
 # SI BESOIN samples à inclure/exclure:  
 # SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
@@ -49,7 +49,7 @@ print(SAMPLES)
 # RULE ALL, appel le reste des règles
 rule all:
     # Variant calling
-    input: expand(data_dir+"stats_covdp/{sample}.tsv", sample= SAMPLES)
+    input: expand(data_dir+"deduplicated/stats/{sample}.tsv", sample= SAMPLES)
 
 
 # ======================================================== VARIANT CALLING & FILTERING ========================================================== #
@@ -72,10 +72,10 @@ rule stats_covdp:
     conda: conda_dir+"variants_env.yaml"    
     shell:
         """
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/stats/"
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/stats_covdp/"
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/stats/
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/stats_covdp/
 
-        samtools coverage {input.bam} | head -n 16 > {output.tsv} >{params.out} 2>{params.err}
+        samtools coverage {input.bam} | head -n 16 > {output.tsv} 
         """
 
 
@@ -99,8 +99,8 @@ rule variant_calling:
     conda: conda_dir+"variants_env.yaml"   
     shell:
         """
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/variants/"
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/"
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/variants/
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/Ò
 
         bcftools mpileup -Ou -f {input.ref} {input.bam} | bcftools call -m --ploidy 2 -Ob -o {output.bcf} >{params.out} 2>{params.err}
         """

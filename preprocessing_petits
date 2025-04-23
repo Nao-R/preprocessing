@@ -200,8 +200,8 @@ rule deduplicate:
         benchmarks_dir+"deduplicate/{sample}_markdup.tsv"
     shell:
         """
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/"
-        mkdir -p "/beegfs/data/nroscigni/bedbugs/quality_control/logs/deduplicate/"
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/deduplicate/
 
         # Picard MarkDup
         picard MarkDuplicates --INPUT {input.bam} --OUTPUT {output.marked_bam} --METRICS_FILE {output.metrics} --CREATE_INDEX true >{params.out} 2>{params.err}

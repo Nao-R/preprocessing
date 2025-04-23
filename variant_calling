@@ -24,7 +24,7 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = ['Cimex443']
+SAMPLES = ['Cimex57']
 
 # SI BESOIN samples à inclure/exclure:  
 # SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
@@ -69,14 +69,14 @@ rule stats_covdp:
     input: 
         bam= data_dir+"deduplicated/{sample}.markedDup.bam",
     output:
-        tsv= data_dir+"deduplicated/stats/{sample}.tsv"
+        tsv= data_dir+"/stats/{sample}.tsv"
     conda: conda_dir+"variants_env.yaml"    
     shell:
         """
         mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/deduplicated/stats/
         mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/stats_covdp/
 
-        samtools coverage {input.bam} | head -n 16 > {output.tsv} 
+        samtools coverage {input.bam} | head -n 16 > {output.tsv} || true
         """
 
 
@@ -89,13 +89,13 @@ rule variant_calling_mpileup:
         out=logs_dir+"variant_calling/mpileup.log",
         err=logs_dir+"variant_calling/mpileup.err",
         time="08:00:00",  
-        mem="30G",        
+        mem="30G",      # ??? comme pas possible test?  
         cpus="8"
     input:
         bams= expand(data_dir+"deduplicated/{sample}.markedDup.bam"),
         ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
     output:
-        bcf= data_dir+"variants/.bcf"
+        bcf= data_dir+"variants/mpileup_all_samples.bcf"
     conda: conda_dir+"variants_env.yaml"
     shell:
         """
@@ -106,8 +106,7 @@ rule variant_calling_mpileup:
             --threads 20 \
             -a FORMAT/AD,FORMAT/DP,FORMAT/SP,INFO/AD \ # specify tags
             -f {input.ref} \ # reference genome
-        -b {input.bams} \
-
+        -b {input.bams} 
         """
 
 # VARIANT FILTERING

@@ -24,19 +24,19 @@ import os
 
 # All FASTQ samples
 DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
-SAMPLES = ['Cimex57']
+#SAMPLES = DATA
 
 # SI BESOIN samples à inclure/exclure:  
-# SAMPLES_INCLUDED/EXCLUDED = {'Cimex426', 'Cimex436', 'Cimex450', 'Cimex355', 'Cimex444', 'Cimex437', 'Cimex451', 'Cimex454', 'Cimex453','Cimex449', 'Cimex435', 'Cimex319','Cimex142'}
+SAMPLES_EXCLUDED = {'Cimex18-18', 'Cimex18-7'}
 
 # Path where BAM files should exist
 BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
 
 # SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
 # ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
-# SAMPLES = [
-    #sample for sample in DATA 
-    #if (sample in SAMPLES_INCLUDED)
+SAMPLES = [
+    sample for sample in DATA 
+    if (sample not in SAMPLES_EXCLUDED)]
     #and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))]
 
 print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
@@ -48,8 +48,9 @@ print(SAMPLES)
 
 # RULE ALL, appel le reste des règles
 rule all:
-    # Variant calling
-    input: expand(data_dir+"deduplicated/stats/{sample}.tsv", sample= SAMPLES)
+    input: 
+        expand(data_dir+"stats/{sample}.tsv", sample=SAMPLES),
+        data_dir+"variants/mpileup_all_samples.bcf"
 
 
 # ======================================================== VARIANT CALLING & FILTERING ========================================================== #
@@ -63,13 +64,13 @@ rule stats_covdp:
         partition="normal",
         out=logs_dir+"stats_covdp/{sample}.log",
         err=logs_dir+"stats_covdp/{sample}.err",
-        time="00:40:00", 
-        mem="1G",      
+        time="00:30:00", 
+        mem="500M",      
         cpus="1"
     input: 
         bam= data_dir+"deduplicated/{sample}.markedDup.bam",
     output:
-        tsv= data_dir+"/stats/{sample}.tsv"
+        tsv= data_dir+"stats/{sample}.tsv"
     conda: conda_dir+"variants_env.yaml"    
     shell:
         """
@@ -80,56 +81,82 @@ rule stats_covdp:
         """
 
 
-"""
 # VARIANT CALLING
 rule variant_calling_mpileup:
-    params:
-        name="variant_calling_mpileup_Cimex",
-        partition="normal",
-        out=logs_dir+"variant_calling/mpileup.log",
-        err=logs_dir+"variant_calling/mpileup.err",
-        time="08:00:00",  
-        mem="30G",      # ??? comme pas possible test?  
-        cpus="8"
-    input:
-        bams= expand(data_dir+"deduplicated/markedDup.bam"),
-        ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
-    output:
-        bcf= data_dir+"variants/mpileup_all_samples.bcf"
-    conda: conda_dir+"variants_env.yaml"
-    shell:
+   params:
+       name="variant_calling_mpileup_Cimex",
+       partition="normal",
+       out=logs_dir+"variant_calling/mpileup.log",
+       err=logs_dir+"variant_calling/mpileup.err",
+       time="16:00:00", 
+       mem="30G",      # ??? comme pas possible test? 
+       cpus="12"
+   input:
+       bam_list= data_dir+"deduplicated/bam_list.txt",
+       ref= data_dir+"ref_genome/Cimex_ref_genome.fa"
+   output:
+       bcf= data_dir+"variants/mpileup_all_samples.bcf"
+   conda: conda_dir+"variants_env.yaml"
+   shell:
         """
         mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/variants/
         mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/variant_calling/
 
         bcftools mpileup \
-            --threads 20 \
-            -a FORMAT/AD,FORMAT/DP,FORMAT/SP,INFO/AD \ # specify tags
-            -f {input.ref} \ # reference genome
-        -b {input.bams} 
-        """
+            --threads {params.cpus} \
+            -a FORMAT/AD,FORMAT/DP,FORMAT/QS,FORMAT/SP,INFO/AD \
+            -f {input.ref} \
+            -r "scaffold_1" \
+            -b {input.bam_list} \
+            -Ou -o {output.bcf}
+
+       """
+
+rule variant_calling_call:
+   params:
+       name="variant_calling_call_Cimex",
+       partition="normal",
+       out=logs_dir+"variant_calling/call.log",
+       err=logs_dir+"variant_calling/call.err",
+       time="08:00:00", 
+       mem="30G",      # ??? comme pas possible test? 
+       cpus="8"
+       samples_host= data_dir+"variants/Samples_Host.tsv"
+   input:
+       bcf= data_dir+"variants/mpileup_all_samples.bcf"
+   output:
+       bcf= data_dir+"variants/call_all_samples.bcf"
+   conda: conda_dir+"variants_env.yaml"
+   shell:
+       """
+        bcftools call \
+        --group-samples {params.samples_host}
+	    --format-fields GQ,GP \
+	    --multiallelic-caller \
+        -Ob \
+	    -o {output.bcf} \
+        {input.bcf}
+       """
 
 # VARIANT FILTERING
 rule variant_filter:
-    params:
-        name="variant_filtering{sample}",   
-        partition="normal",
-        out=logs_dir+"variant_calling/{sample}.filtered.log",
-        err=logs_dir+"variant_calling/{sample}.filtered.err",
-        time="10:00:00", 
-        mem="15G",      
-        cpus="3",
-        min_qual= 30,      # min quality score ok
-        min_dp= 5,         # min depth ok
-        max_dp= 80,        # estimation couv moy par éch & plot histogram (80 comme départ)
-    input:
-        bcf= data_dir+"variants/{sample}.bcf",
-    output:
-        vcf= data_dir+"variants/{sample}filtered.vcf.gz",
-    conda: conda_dir+"variants_env.yaml" 
-    shell:
-        """
-        bcftools view {input.bcf} | bcftools filter -e 'QUAL < {params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' >{params.out} 2>{params.err}
-        """
-
-     """   
+   params:
+       name="variant_filtering{sample}",  
+       partition="normal",
+       out=logs_dir+"variant_calling/{sample}.filtered.log",
+       err=logs_dir+"variant_calling/{sample}.filtered.err",
+       time="10:00:00",
+       mem="15G",     
+       cpus="3",
+       min_qual= 30,      # min quality score ok
+       min_dp= 5,         # min depth ok
+       max_dp= 80
+   input:
+       bcf= data_dir+"variants/call_all_samples.bcf"
+   output:
+       vcf= data_dir+"variants/{sample}filtered.vcf.gz",
+   conda: conda_dir+"variants_env.yaml"
+   shell:
+       """
+       bcftools view {input.bcf} | bcftools filter -e 'QUAL < {params.min_qual} || DP < {params.min_dp} || DP > {params.max_dp}' >{params.out} 2>{params.err}
+       """

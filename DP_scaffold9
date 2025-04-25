@@ -1,0 +1,79 @@
+
+# COMMANDES LANCEMENT
+# snakemake -s FILE --rerun-triggers mtime --cluster "sbatch -J {params.name} -p {params.partition} -t {params.time} --mem {params.mem} --cpus-per-task {params.cpus} -o {params.out} -e {params.err}" --jobs 1 --use-conda --conda-frontend conda -np 
+
+# ===== DEFINITION DES PATHS ===== #
+
+# Raw data:
+raw_dir="/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/"           # données brutes chez JV     
+# New data:
+data_dir="/beegfs/data/nroscigni/bedbugs/quality_control/data/"
+# Outputs contrôle qualité
+qc_dir="/beegfs/data/nroscigni/bedbugs/quality_control/qc/"
+# Conda environments:
+conda_dir="/beegfs/data/nroscigni/bedbugs/quality_control/script/conda_env/"        
+# Logiciels utilisés:
+fastp_dir="/beegfs/home/varaldi/TOOLS/fastp"
+# Logs:
+logs_dir="/beegfs/data/nroscigni/bedbugs/quality_control/logs/"
+# Benchmarks 
+benchmarks_dir="/beegfs/data/nroscigni/bedbugs/quality_control/benchmark/"
+
+# ===== DEFINITION DES ECHANTILLONS ===== #
+import os
+
+# All FASTQ samples
+DATA = glob_wildcards("/beegfs/data/varaldi/BEDBUGS/batbugs/data/raw2/{sample}_R1.fastq.gz").sample
+#SAMPLES = ['Cimex2']
+
+# SI BESOIN samples à inclure/exclure:  
+SAMPLES_EXCLUDED = {'Cimex18-18', 'Cimex18-7'}
+
+# Path where BAM files should exist
+BAM_DIR = "/beegfs/data/nroscigni/bedbugs/quality_control/data/mapped/"
+
+# SI BESOIN chels outputs manquent sans tout refaire car fichiers supprimés 
+# ex. only keep samples: in SAMPLES_INCLUDED & without .sorted.bam 
+SAMPLES = [
+    sample for sample in DATA 
+    if (sample not in SAMPLES_EXCLUDED)]
+    #and (not (os.path.exists(f"{data_dir}/mapped/{sample}.sorted.bam")))]
+
+print(f"Nombre d'échantillons à lancer :--) : {len(SAMPLES)}")
+print(SAMPLES)
+
+
+# =================================================================== RULE ALL =================================================================== #
+
+
+# RULE ALL, appel le reste des règles
+rule all:
+    input: 
+        expand(data_dir+"stats/DP_scaffold9_8/{sample}_8.tsv", sample = SAMPLES),
+        expand(data_dir+"stats/DP_scaffold9_8/{sample}_9.tsv", sample = SAMPLES)
+
+
+rule samtools_depth:
+    params:
+        name="depth_{sample}",   
+        partition="normal",
+        out=logs_dir+"stats_covdp/{sample}.log",
+        err=logs_dir+"stats_covdp/{sample}.err",
+        time="00:15:00", 
+        mem="300M",      
+        cpus="1"
+    input: 
+        bam= data_dir+"deduplicated/{sample}.markedDup.bam",
+    output:
+        tsv8= data_dir+"stats/DP_scaffold9_8/{sample}_8.tsv",
+        tsv9= data_dir+"stats/DP_scaffold9_8/{sample}_9.tsv"
+    conda: conda_dir+"variants_env.yaml"    
+    shell:
+        """
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/data/stats/DP_scaffold9_8/
+        mkdir -p /beegfs/data/nroscigni/bedbugs/quality_control/logs/stats_covdp/
+
+        samtools depth -a -r scaffold_8 {input.bam} > {output.tsv8}
+        samtools depth -a -r scaffold_9 {input.bam} > {output.tsv9}
+
+        """
